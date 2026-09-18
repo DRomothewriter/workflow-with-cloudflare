@@ -25,4 +25,9 @@ jobs:
               run: npm run build
             - name: Run Unit Test
               run: npm test -- --run
+            - name: Deploy to Cloudflare Workers
+              uses: cloudflare/wrangler-action@v4
+              with:
+                api-token: ${{ secrets.API_KEY }}
+                account-id: ${{ secrets.ACCOUNT_ID }}
 
