@@ -1,29 +1,61 @@
-import {
-	env,
-	createExecutionContext,
-	waitOnExecutionContext,
-	SELF,
-} from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import worker from "../src/index";
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+describe("Worker with D1 Database", () => {
+	it("queries the database and returns users in GET /", async () => {
+		const mockUsers = [{ id: 1, name: "Diego Romo", email: "diego@ejemplo.com" }];
+		const mockDb = {
+			prepare: vi.fn().mockReturnValue({
+				all: vi.fn().mockResolvedValue({ results: mockUsers }),
+			}),
+		} as unknown as D1Database;
 
-describe("Hello World worker", () => {
-	it("responds with Hello from Cloudflare Workers! Este es un mensaje desde mi primer worker. (unit style)", async () => {
-		const request = new IncomingRequest("http://example.com");
-		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello from Cloudflare Workers! Este es un mensaje desde mi primer worker."`);
+		const mockEnv = {
+			p6: mockDb,
+		};
+
+		const request = new Request("http://example.com");
+		const ctx = {
+			waitUntil: vi.fn(),
+			passThroughOnException: vi.fn(),
+		} as unknown as ExecutionContext;
+
+		const response = await worker.fetch(request, mockEnv, ctx);
+		const data = await response.json();
+
+		expect(response.status).toBe(200);
+		expect(data).toEqual(mockUsers);
 	});
 
-	it("responds with Hello from Cloudflare Workers! Este es un mensaje desde mi primer worker. (integration style)", async () => {
-		const response = await SELF.fetch("https://example.com");
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello from Cloudflare Workers! Este es un mensaje desde mi primer worker."`);
+	it("creates a new user in POST /users", async () => {
+		const newUser = { id: 2, name: "Ana Perez", email: "ana@ejemplo.com" };
+		const mockDb = {
+			prepare: vi.fn().mockReturnValue({
+				bind: vi.fn().mockReturnValue({
+					first: vi.fn().mockResolvedValue(newUser),
+				}),
+			}),
+		} as unknown as D1Database;
+
+		const mockEnv = {
+			p6: mockDb,
+		};
+
+		const request = new Request("http://example.com/users", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ name: "Ana Perez", email: "ana@ejemplo.com" }),
+		});
+		const ctx = {
+			waitUntil: vi.fn(),
+			passThroughOnException: vi.fn(),
+		} as unknown as ExecutionContext;
+
+		const response = await worker.fetch(request, mockEnv, ctx);
+		const data = (await response.json()) as { success: boolean; user: typeof newUser };
+
+		expect(response.status).toBe(201);
+		expect(data.success).toBe(true);
+		expect(data.user).toEqual(newUser);
 	});
 });
